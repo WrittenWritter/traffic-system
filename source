@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Circles & LED Simulator</title>
+  <style>
+    body { font-family: sans-serif; }
+    canvas { border: 1px solid #aaa; display: block; margin: 20px 0; }
+    #led {
+      width: 60px; height: 60px; border-radius: 50%; 
+      background: #555; margin: 10px auto 20px auto; 
+      box-shadow: 0 0 10px #222;
+      border: 3px solid #222;
+      transition: background 0.2s;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: bold; color: #fff;
+      font-size: 1.2em;
+    }
+    #led.blink { animation: blink 0.7s infinite; }
+    @keyframes blink {
+      0%, 49% { background: #e00; }
+      50%, 100% { background: #555; }
+    }
+    #led.red { background: #e00; }
+    #led.off { background: #555; }
+  </style>
+</head>
+<body>
+  <h2 style="text-align:center">Circles & LED Simulator</h2>
+  <div id="led" class="off">LED</div>
+  <canvas id="canvas" width="700" height="400"></canvas>
+  <div style="text-align:center; color:#666; margin-top:10px;">Drag squares into circles. See the LED respond above!</div>
+  <script>
+    // --- LED handling ---
+    const led = document.getElementById("led");
+    let blinkInterval = null;
+
+    function setLed(state) {
+      led.classList.remove("off", "red", "blink");
+      if(state === "off") {
+        led.classList.add("off");
+        led.textContent = "LED";
+      } else if(state === "red") {
+        led.classList.add("red");
+        led.textContent = "RED";
+      } else if(state === "blink") {
+        led.classList.add("blink");
+        led.textContent = "BLINK";
+      }
+    }
+
+    // --- Canvas code (from previous version) ---
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const circles = [
+      { x: 150, y: 200, r: 70, squares: [], label: "Counter" },
+      { x: 350, y: 200, r: 70, squares: [], label: "LED if >4" },
+      { x: 550, y: 200, r: 70, squares: [], label: "Flicker if 2 colors" }
+    ];
+    let squares = [
+      { x: 20, y: 30, color: 'blue', inCircle: -1 },
+      { x: 20, y: 110, color: 'red', inCircle: -1 },
+      { x: 20, y: 190, color: 'blue', inCircle: -1 },
+      { x: 20, y: 270, color: 'red', inCircle: -1 },
+      { x: 20, y: 350, color: 'blue', inCircle: -1 }
+    ];
+    let dragging = null, dx = 0, dy = 0;
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      circles.forEach((c, i) => {
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+        ctx.fillStyle = "#fff";
+        ctx.fill();
+        ctx.strokeStyle = '#888';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.font = "16px Arial";
+        ctx.fillStyle = "#000";
+        ctx.textAlign = "center";
+        ctx.fillText(c.label, c.x, c.y - c.r - 10);
+        if (i === 0) ctx.fillText(`Count: ${c.squares.length}`, c.x, c.y);
+        if (i === 1) ctx.fillText(`LED: ${c.squares.length > 3 ? 'ON' : 'OFF'}`, c.x, c.y);
+        if (i === 2) {
+          const colors = new Set(c.squares.map(sq => sq.color));
+          ctx.fillText(`Blink: ${colors.size > 1 ? 'YES' : 'NO'}`, c.x, c.y);
+        }
+      });
+      squares.forEach(sq => {
+        ctx.fillStyle = sq.color;
+        ctx.fillRect(sq.x, sq.y, 50, 50);
+        ctx.strokeStyle = '#000';
+        ctx.strokeRect(sq.x, sq.y, 50, 50);
+      });
+    }
+    draw();
+
+    function pointInSquare(x, y, sq) {
+      return x >= sq.x && x <= sq.x + 50 && y >= sq.y && y <= sq.y + 50;
+    }
+    function pointInCircle(x, y, c) {
+      return Math.hypot(x - c.x, y - c.y) < c.r;
+    }
+    canvas.onmousedown = e => {
+      const rect = canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      for (let i = squares.length - 1; i >= 0; i--) {
+        if (pointInSquare(mx, my, squares[i])) {
+          dragging = i;
+          dx = mx - squares[i].x;
+          dy = my - squares[i].y;
+          break;
+        }
+      }
+    };
+    canvas.onmousemove = e => {
+      if (dragging == null) return;
+      const rect = canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      squares[dragging].x = mx - dx;
+      squares[dragging].y = my - dy;
+      draw();
+    };
+    canvas.onmouseup = e => {
+      if (dragging == null) return;
+      const rect = canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      let sq = squares[dragging], dropped = false;
+      circles.forEach((c, ci) => {
+        if (pointInCircle(mx, my, c)) {
+          circles.forEach(c2 => c2.squares = c2.squares.filter(sqi => sqi !== sq));
+          c.squares.push(sq);
+          sq.inCircle = ci;
+          dropped = true;
+        }
+      });
+      if (!dropped) {
+        circles.forEach(c2 => c2.squares = c2.squares.filter(sqi => sqi !== sq));
+        sq.inCircle = -1;
+      }
+      dragging = null;
+      draw();
+      updateLed();
+    };
+
+    // --- LED Logic according to the rules ---
+    let ledBlinkTimer = null;
+    function updateLed() {
+      // Circle 2: If has 4 or more cubes (i.e., length >= 4), solid red
+      // Circle 3: If has both colors, blink red
+      // If both true, blinking has priority
+
+      let ledSolidRed = circles[1].squares.length >= 4;
+      let c3colors = new Set(circles[2].squares.map(sq => sq.color));
+      let ledBlink = c3colors.size > 1;
+
+      if (ledBlink) {
+        setLed("blink");
+      } else if (ledSolidRed) {
+        setLed("red");
+      } else {
+        setLed("off");
+      }
+    }
+  </script>
+</body>
+</html>
